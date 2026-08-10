@@ -1,0 +1,41 @@
+name: Kirim Loker Digital ke Discord
+
+on:
+  schedule:
+    # Tiap 6 jam (waktu UTC) = 4x sehari, sesuai batas wajar Remotive API.
+    # Format cron: menit jam tanggal bulan hari. Ubah sesuai kebutuhan,
+    # cek https://crontab.guru kalau mau custom.
+    - cron: "0 */6 * * *"
+  workflow_dispatch: {} # biar bisa dipicu manual dari tab "Actions" di GitHub
+
+permissions:
+  contents: write # perlu buat commit balik file seen_jobs.json
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Jalankan job notifier
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python job_notifier.py
+
+      - name: Simpan histori loker yang sudah dikirim
+        run: |
+          git config user.name "loker-digital-bot"
+          git config user.email "actions@github.com"
+          git add seen_jobs.json
+          git diff --quiet --cached || git commit -m "chore: update seen_jobs.json"
+          git push
