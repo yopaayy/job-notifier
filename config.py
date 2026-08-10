@@ -89,6 +89,20 @@ API_SOURCES = [
         "location_key": "location",
         "job_type_key": "type",
     },
+    # --- Jobicy: free API, no key, global + Asia coverage, company logos ---
+    {
+        "name": "Jobicy",
+        "url": "https://jobicy.com/api/v2/remote-jobs?count=50",
+        "items_path": "jobs",
+        "title_key": "jobTitle",
+        "company_key": "companyName",
+        "url_key": "url",
+        "category_key": "jobIndustry",  # array
+        "logo_key": "companyLogo",
+        "location_key": "jobGeo",
+        "job_type_key": "jobType",  # array
+        "tags_key": "jobIndustry",
+    },
 ]
 
 # ------------------------------------------------------------------------
@@ -120,6 +134,7 @@ SOURCE_COLORS = {
     "Remotive": 0x00A264,
     "Himalayas": 0x6C5CE7,
     "RemoteJobs.org": 0x2F80ED,
+    "Jobicy": 0xFF6B6B,
 }
 DEFAULT_COLOR = 0x5865F2  # Discord blurple, dipakai kalau source gak ada di atas
 

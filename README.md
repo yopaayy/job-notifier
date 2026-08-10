@@ -18,6 +18,7 @@ Bot **tanpa server (serverless)** yang narik loker dari beberapa job board grati
 | **Remotive** | API | Job remote internasional, macam-macam kategori |
 | **Himalayas** | API | Job remote internasional |
 | **RemoteJobs.org** | API | Agregat dari 5 sumber |
+| **Jobicy** | API | Job remote global termasuk Asia & worldwide |
 | Google Alerts RSS | RSS (opsional) | Untuk loker Indonesia lokal (Glints/Kalibrr/JobStreet) |
 
 ## ⚡ Quick Start (± 10 menit)
