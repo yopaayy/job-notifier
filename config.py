@@ -34,8 +34,15 @@ KEYWORDS = [
 
 # ------------------------------------------------------------------------
 # Sumber berbasis JSON API — gratis, tanpa API key (dicek per Agustus 2026)
-# items_path: nama key di response yang isinya list job
-# *_key: nama field job (boleh dot-path utk nested, misal "company.name")
+#
+# items_path  : nama key di response yang isinya list job
+# *_key       : nama field job (boleh dot-path utk nested, misal "company.name")
+# logo_key    : field logo perusahaan (URL gambar)
+# salary_key  : field gaji (string/number)
+# salary_min_key / salary_max_key / salary_currency_key : field gaji terpisah
+# location_key: field lokasi kerja
+# job_type_key: field tipe pekerjaan (full-time, part-time, dll)
+# tags_key    : field tags/skill
 # ------------------------------------------------------------------------
 API_SOURCES = [
     {
@@ -46,15 +53,28 @@ API_SOURCES = [
         "company_key": "company_name",
         "url_key": "url",
         "category_key": "category",
+        "logo_key": "company_logo",
+        "salary_key": "salary",
+        "location_key": "candidate_required_location",
+        "job_type_key": "job_type",
+        "tags_key": "tags",
     },
     {
         "name": "Himalayas",
-        "url": "https://himalayas.app/jobs/api?limit=20",
+        "url": "https://himalayas.app/jobs/api?limit=50",
         "items_path": "jobs",
         "title_key": "title",
         "company_key": "companyName",
         "url_key": "applicationLink",
         "category_key": "categories",  # array di response, otomatis digabung
+        "logo_key": "companyLogo",
+        "salary_min_key": "minSalary",
+        "salary_max_key": "maxSalary",
+        "salary_currency_key": "currency",
+        "salary_period_key": "salaryPeriod",
+        "location_key": "locationRestrictions",
+        "job_type_key": "employmentType",
+        "tags_key": "categories",
     },
     {
         "name": "RemoteJobs.org",
@@ -64,6 +84,10 @@ API_SOURCES = [
         "company_key": "company.name",
         "url_key": "url",
         "category_key": "category.name",
+        "logo_key": "company.logo",
+        "salary_key": "salary",
+        "location_key": "location",
+        "job_type_key": "type",
     },
 ]
 
@@ -98,3 +122,56 @@ SOURCE_COLORS = {
     "RemoteJobs.org": 0x2F80ED,
 }
 DEFAULT_COLOR = 0x5865F2  # Discord blurple, dipakai kalau source gak ada di atas
+
+# -------------------------------------------------------------------------
+# Estimasi gaji default per kategori (USD/tahun) — dipakai kalau API
+# tidak menyertakan data gaji. Angka berdasarkan median remote salary
+# dari berbagai sumber (Glassdoor, Levels.fyi, Remotive salary data 2025).
+# -------------------------------------------------------------------------
+SALARY_ESTIMATES = {
+    # IT / Engineering
+    "software engineer": "$70k – $150k",
+    "developer": "$60k – $130k",
+    "frontend": "$55k – $120k",
+    "backend": "$65k – $140k",
+    "full stack": "$65k – $135k",
+    "fullstack": "$65k – $135k",
+    "devops": "$80k – $160k",
+    "cloud engineer": "$80k – $155k",
+    "data engineer": "$75k – $150k",
+    "data scientist": "$80k – $160k",
+    "data analyst": "$50k – $100k",
+    "qa engineer": "$50k – $110k",
+    "mobile developer": "$60k – $135k",
+    "sysadmin": "$50k – $100k",
+    "it support": "$35k – $65k",
+    # Design
+    "designer": "$50k – $120k",
+    "ui/ux": "$55k – $125k",
+    "ui designer": "$50k – $115k",
+    "ux designer": "$55k – $125k",
+    "graphic design": "$40k – $90k",
+    "product designer": "$70k – $140k",
+    # Gaming
+    "game developer": "$55k – $130k",
+    "game designer": "$50k – $120k",
+    "unity": "$55k – $125k",
+    "unreal engine": "$60k – $135k",
+    # Marketing & Content
+    "digital marketing": "$40k – $90k",
+    "marketer": "$40k – $95k",
+    "seo": "$40k – $85k",
+    "content writer": "$35k – $75k",
+    "copywriter": "$40k – $80k",
+    "content creator": "$35k – $75k",
+    "social media": "$35k – $70k",
+    "community manager": "$35k – $70k",
+    "growth": "$60k – $130k",
+    "performance marketing": "$50k – $110k",
+    # Finance / Crypto
+    "trader": "$60k – $150k",
+    "trading": "$60k – $150k",
+    "crypto": "$65k – $160k",
+    "blockchain": "$70k – $170k",
+}
+DEFAULT_SALARY_ESTIMATE = "$40k – $100k"

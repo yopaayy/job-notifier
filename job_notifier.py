@@ -1,10 +1,10 @@
 """
-Discord Loker Digital Notifier
--------------------------------
+Discord Loker Digital Notifier — Rich Embed Edition
+-----------------------------------------------------
 Ambil loker dari beberapa API job board + (opsional) RSS, saring sesuai
 niche "digital" (game/esport, remote, IT/dev, programmer, designer,
 trader, content creator, marketer, dll), lalu kirim yang BARU sebagai
-embed ke Discord webhook.
+embed KAYA (thumbnail logo, gaji, lokasi, tags) ke Discord webhook.
 
 Jalankan manual:
   DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/xxx" python job_notifier.py
@@ -16,6 +16,7 @@ Di GitHub Actions:
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -29,16 +30,18 @@ from urllib3.util.retry import Retry
 from config import (
     API_SOURCES,
     DEFAULT_COLOR,
+    DEFAULT_SALARY_ESTIMATE,
     KEYWORDS,
     MAX_EMBEDS_PER_MESSAGE,
     MAX_SEEN_HISTORY,
     RSS_FEEDS,
+    SALARY_ESTIMATES,
     SEEN_FILE,
     SOURCE_COLORS,
 )
 
 # ---------------------------------------------------------------------------
-# Logging setup — timestamp + level + message
+# Logging setup
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +54,9 @@ log = logging.getLogger("job_notifier")
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 USER_AGENT = "discord-loker-digital-bot/2.0 (+github-actions)"
 
+# Fallback logo kalau API tidak menyediakan
+FALLBACK_LOGO = "https://ui-avatars.com/api/?background=5865F2&color=fff&bold=true&size=128&name="
+
 
 # ---------------------------------------------------------------------------
 # HTTP Session — auto retry on transient errors
@@ -60,7 +66,7 @@ def _build_session():
     session = requests.Session()
     retry = Retry(
         total=3,
-        backoff_factor=1.5,              # 0s, 1.5s, 3s
+        backoff_factor=1.5,
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["GET", "POST"],
         raise_on_status=False,
@@ -121,8 +127,129 @@ def save_seen(seen_ids):
 
 
 # ---------------------------------------------------------------------------
+# Salary helpers
+# ---------------------------------------------------------------------------
+def _format_salary_range(min_sal, max_sal, currency="USD", period="annual"):
+    """Format min/max salary jadi string yang readable."""
+    currency = (currency or "USD").upper()
+    symbol = {"USD": "$", "EUR": "€", "GBP": "£", "IDR": "Rp"}.get(currency, currency + " ")
+
+    def _fmt(val):
+        if val >= 1000:
+            return f"{symbol}{val / 1000:.0f}k"
+        return f"{symbol}{val:.0f}"
+
+    period_label = {"annual": "/thn", "yearly": "/thn", "monthly": "/bln",
+                    "hourly": "/jam"}.get(period, "")
+
+    if min_sal and max_sal:
+        return f"{_fmt(min_sal)} – {_fmt(max_sal)}{period_label}"
+    elif min_sal:
+        return f"{_fmt(min_sal)}+{period_label}"
+    elif max_sal:
+        return f"s.d. {_fmt(max_sal)}{period_label}"
+    return None
+
+
+def _estimate_salary(title, category=""):
+    """Estimasi kisaran gaji berdasarkan judul/kategori job."""
+    text = f"{title} {category}".lower()
+    for keyword, estimate in SALARY_ESTIMATES.items():
+        if keyword.lower() in text:
+            return f"~{estimate} /thn (estimasi)"
+    return f"~{DEFAULT_SALARY_ESTIMATE} /thn (estimasi)"
+
+
+def get_salary_display(job_data, source_config, title, category=""):
+    """Ambil info gaji dari data API, format, atau estimasi kalau tidak ada."""
+    # 1. Cek salary string langsung (Remotive style)
+    salary_str = get_nested(job_data, source_config.get("salary_key"))
+    if salary_str and str(salary_str).strip():
+        return str(salary_str).strip()
+
+    # 2. Cek min/max salary (Himalayas style)
+    min_key = source_config.get("salary_min_key")
+    max_key = source_config.get("salary_max_key")
+    if min_key or max_key:
+        min_sal = get_nested(job_data, min_key)
+        max_sal = get_nested(job_data, max_key)
+        if min_sal or max_sal:
+            currency = get_nested(job_data, source_config.get("salary_currency_key"))
+            period = get_nested(job_data, source_config.get("salary_period_key"))
+            formatted = _format_salary_range(
+                float(min_sal) if min_sal else 0,
+                float(max_sal) if max_sal else 0,
+                currency, period
+            )
+            if formatted:
+                return formatted
+
+    # 3. Fallback: estimasi berdasarkan judul/kategori
+    return _estimate_salary(title, category)
+
+
+# ---------------------------------------------------------------------------
 # Fetch sources
 # ---------------------------------------------------------------------------
+def _get_company_logo(item, source, company_name):
+    """Ambil logo URL, fallback ke avatar generator kalau kosong."""
+    logo = get_nested(item, source.get("logo_key"))
+    if logo and str(logo).strip() and str(logo).startswith("http"):
+        return str(logo).strip()
+    # Fallback: generate avatar dari nama company
+    name_encoded = (company_name or "Co").replace(" ", "+")
+    return FALLBACK_LOGO + name_encoded
+
+
+def _format_job_type(raw_type):
+    """Format job type jadi label yang rapi."""
+    if not raw_type:
+        return "🏢 Full-time"
+    raw = str(raw_type).lower().replace("_", " ").replace("-", " ")
+    mapping = {
+        "full time": "🏢 Full-time",
+        "fulltime": "🏢 Full-time",
+        "part time": "⏰ Part-time",
+        "parttime": "⏰ Part-time",
+        "contract": "📋 Contract",
+        "freelance": "💼 Freelance",
+        "internship": "🎓 Internship",
+        "temporary": "⏳ Temporary",
+    }
+    return mapping.get(raw, f"💼 {raw_type}")
+
+
+def _format_tags(item, source, max_tags=4):
+    """Ambil tags dan format sebagai badge-style string."""
+    tags_raw = get_nested(item, source.get("tags_key"))
+    if not tags_raw:
+        return None
+    if isinstance(tags_raw, str):
+        tags = [t.strip() for t in tags_raw.replace("-", " ").split() if t.strip()]
+    else:
+        tags = tags_raw if isinstance(tags_raw, list) else []
+    # Clean up tags
+    clean_tags = []
+    for tag in tags[:max_tags]:
+        tag_str = str(tag).strip().replace("-", " ").title()
+        if len(tag_str) > 20:
+            tag_str = tag_str[:18] + "…"
+        clean_tags.append(f"`{tag_str}`")
+    return " ".join(clean_tags) if clean_tags else None
+
+
+def _format_location(item, source):
+    """Ambil dan format lokasi."""
+    loc = get_nested(item, source.get("location_key"))
+    if not loc:
+        return "🌍 Remote (Worldwide)"
+    if isinstance(loc, list):
+        loc = ", ".join(str(l) for l in loc[:3])
+        if len(loc) > 50:
+            loc = loc[:47] + "…"
+    return f"📍 {loc}"
+
+
 def fetch_api_source(source):
     """Fetch loker dari satu API source, return list of job dicts."""
     name = source["name"]
@@ -160,6 +287,12 @@ def fetch_api_source(source):
         if not matches_keywords(f"{title} {category}"):
             continue
 
+        salary = get_salary_display(item, source, str(title), str(category))
+        logo = _get_company_logo(item, source, str(company))
+        location = _format_location(item, source)
+        job_type = _format_job_type(get_nested(item, source.get("job_type_key")))
+        tags = _format_tags(item, source)
+
         jobs.append(
             {
                 "id": url,
@@ -167,6 +300,11 @@ def fetch_api_source(source):
                 "company": str(company).strip(),
                 "url": url,
                 "source": name,
+                "salary": salary,
+                "logo": logo,
+                "location": location,
+                "job_type": job_type,
+                "tags": tags,
             }
         )
 
@@ -193,13 +331,22 @@ def fetch_rss_source(source):
             continue
         if not matches_keywords(title):
             continue
+
+        label = source.get("label", name)
+        salary_est = _estimate_salary(title)
+
         jobs.append(
             {
                 "id": link,
                 "title": title.strip(),
-                "company": source.get("label", name),
+                "company": label,
                 "url": link,
                 "source": name,
+                "salary": salary_est,
+                "logo": FALLBACK_LOGO + label.replace(" ", "+"),
+                "location": "🌍 Remote",
+                "job_type": "💼 Lihat detail",
+                "tags": None,
             }
         )
 
@@ -208,18 +355,40 @@ def fetch_rss_source(source):
 
 
 # ---------------------------------------------------------------------------
-# Discord
+# Discord — Rich Embed Builder
 # ---------------------------------------------------------------------------
 def build_embed(job):
-    """Buat satu embed dict untuk Discord webhook."""
-    return {
-        "title": job["title"][:250],
+    """Buat satu embed KAYA untuk Discord webhook."""
+    color = SOURCE_COLORS.get(job["source"], DEFAULT_COLOR)
+
+    # Build description dengan info lengkap
+    desc_lines = [
+        f"🏢  **{job['company']}**",
+        "",
+        f"💰  **{job['salary']}**",
+        f"{job['location']}",
+        f"{job['job_type']}",
+    ]
+
+    if job.get("tags"):
+        desc_lines.append("")
+        desc_lines.append(f"🏷️  {job['tags']}")
+
+    description = "\n".join(desc_lines)
+
+    embed = {
+        "title": f"💼 {job['title'][:245]}",
         "url": job["url"],
-        "description": f"🏢  **{job['company']}**",
-        "color": SOURCE_COLORS.get(job["source"], DEFAULT_COLOR),
-        "footer": {"text": f"📌 Sumber: {job['source']}"},
+        "description": description,
+        "color": color,
+        "thumbnail": {"url": job.get("logo", "")},
+        "footer": {
+            "text": f"📌 {job['source']}  •  Klik judul untuk apply",
+        },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    return embed
 
 
 def send_to_discord(jobs):
@@ -229,6 +398,20 @@ def send_to_discord(jobs):
         return 0
 
     total_sent = 0
+
+    # Kirim header message pertama
+    header_payload = {
+        "content": (
+            f"## 🔔 Loker Digital Baru!\n"
+            f"Ditemukan **{len(jobs)}** lowongan baru yang cocok niche kamu.\n"
+            f"Klik judul untuk langsung apply! ⬇️"
+        )
+    }
+    try:
+        http.post(WEBHOOK_URL, json=header_payload, timeout=20)
+        time.sleep(1)
+    except Exception:
+        pass  # Header opsional, lanjut aja
 
     for i in range(0, len(jobs), MAX_EMBEDS_PER_MESSAGE):
         batch = jobs[i : i + MAX_EMBEDS_PER_MESSAGE]
@@ -262,7 +445,7 @@ def send_to_discord(jobs):
         except requests.exceptions.RequestException as e:
             log.error("❌ Gagal kirim ke Discord: %s", e)
 
-        time.sleep(1.5)  # jaga-jaga rate limit webhook Discord
+        time.sleep(1.5)
 
     return total_sent
 
@@ -271,9 +454,9 @@ def send_to_discord(jobs):
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    log.info("=" * 50)
-    log.info("🚀 Discord Loker Digital Notifier — mulai")
-    log.info("=" * 50)
+    log.info("=" * 55)
+    log.info("🚀 Discord Loker Digital Notifier v2.0 — mulai")
+    log.info("=" * 55)
 
     if not WEBHOOK_URL:
         log.critical(
@@ -309,11 +492,11 @@ def main():
 
     new_jobs = [job for job in all_jobs if job["id"] not in seen]
 
-    log.info("-" * 50)
+    log.info("-" * 55)
     log.info("📊 Total ditemukan  : %d loker cocok niche", len(all_jobs))
     log.info("📊 Sudah dikirim    : %d (skip)", len(all_jobs) - len(new_jobs))
     log.info("📊 Baru (akan kirim): %d", len(new_jobs))
-    log.info("-" * 50)
+    log.info("-" * 55)
 
     # --- Send ---
     sent_count = send_to_discord(new_jobs)
@@ -323,9 +506,9 @@ def main():
     save_seen(seen)
 
     # --- Summary ---
-    log.info("=" * 50)
+    log.info("=" * 55)
     log.info("✅ Selesai — %d loker baru terkirim ke Discord", sent_count)
-    log.info("=" * 50)
+    log.info("=" * 55)
 
 
 if __name__ == "__main__":
