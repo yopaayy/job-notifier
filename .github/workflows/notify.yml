@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Penting untuk rebase
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,6 +33,12 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python job_notifier.py
+
+      - name: Pull latest changes
+        run: |
+          git config user.name "loker-digital-bot"
+          git config user.email "actions@github.com"
+          git pull --rebase origin main
 
       - name: Simpan histori loker yang sudah dikirim
         uses: stefanzweifel/git-auto-commit-action@v5
