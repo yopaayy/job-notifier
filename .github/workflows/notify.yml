@@ -33,10 +33,9 @@ jobs:
         run: python job_notifier.py
 
       - name: Simpan histori loker yang sudah dikirim
-        run: |
-          git config user.name "loker-digital-bot"
-          git config user.email "actions@github.com"
-          git add seen_jobs.json
-          git diff --quiet --cached || git commit -m "chore: update seen_jobs.json"
-          git pull --rebase origin main
-          git push
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update seen_jobs.json"
+          file_pattern: seen_jobs.json
+          commit_user_name: "loker-digital-bot"
+          commit_user_email: "actions@github.com"
