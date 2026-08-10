@@ -54,8 +54,10 @@ log = logging.getLogger("job_notifier")
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 USER_AGENT = "discord-loker-digital-bot/2.0 (+github-actions)"
 
-# Fallback logo kalau API tidak menyediakan
-FALLBACK_LOGO = "https://ui-avatars.com/api/?background=5865F2&color=fff&bold=true&size=128&name="
+# Screenshot service (gratis, tanpa API key) untuk preview halaman job
+SCREENSHOT_URL = "https://image.thum.io/get/width/1280/crop/640/noanimate/"
+# Fallback logo untuk author icon
+FALLBACK_LOGO = "https://ui-avatars.com/api/?background=5865F2&color=fff&bold=true&size=64&name="
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +201,13 @@ def _get_company_logo(item, source, company_name):
     # Fallback: generate avatar dari nama company
     name_encoded = (company_name or "Co").replace(" ", "+")
     return FALLBACK_LOGO + name_encoded
+
+
+def _get_screenshot_url(job_url):
+    """Generate screenshot URL dari halaman job menggunakan thum.io."""
+    if not job_url:
+        return None
+    return SCREENSHOT_URL + job_url
 
 
 def _format_job_type(raw_type):
@@ -355,38 +364,50 @@ def fetch_rss_source(source):
 
 
 # ---------------------------------------------------------------------------
-# Discord — Rich Embed Builder
+# Discord — Article-Style Embed Builder
 # ---------------------------------------------------------------------------
 def build_embed(job):
-    """Buat satu embed KAYA untuk Discord webhook."""
+    """Buat embed style artikel: screenshot job page sebagai gambar besar,
+    company logo sebagai author icon, info lengkap di description."""
     color = SOURCE_COLORS.get(job["source"], DEFAULT_COLOR)
 
     # Build description dengan info lengkap
     desc_lines = [
-        f"🏢  **{job['company']}**",
-        "",
         f"💰  **{job['salary']}**",
-        f"{job['location']}",
-        f"{job['job_type']}",
+        f"{job['location']}  •  {job['job_type']}",
     ]
 
     if job.get("tags"):
-        desc_lines.append("")
         desc_lines.append(f"🏷️  {job['tags']}")
 
     description = "\n".join(desc_lines)
+
+    # Screenshot halaman job sebagai gambar besar (style artikel)
+    screenshot = _get_screenshot_url(job["url"])
 
     embed = {
         "title": f"💼 {job['title'][:245]}",
         "url": job["url"],
         "description": description,
         "color": color,
-        "thumbnail": {"url": job.get("logo", "")},
+        # Company info sebagai author (icon kecil + nama)
+        "author": {
+            "name": f"🏢 {job['company']}",
+        },
         "footer": {
             "text": f"📌 {job['source']}  •  Klik judul untuk apply",
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+    # Tambah company logo sebagai author icon (kalau ada & valid)
+    logo = job.get("logo", "")
+    if logo and logo.startswith("http") and "ui-avatars" not in logo:
+        embed["author"]["icon_url"] = logo
+
+    # Tambah screenshot sebagai gambar besar di bawah (style artikel)
+    if screenshot:
+        embed["image"] = {"url": screenshot}
 
     return embed
 
