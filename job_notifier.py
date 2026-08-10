@@ -13,6 +13,7 @@ Di GitHub Actions:
   URL webhook disimpan sebagai secret DISCORD_WEBHOOK_URL.
 """
 
+import html
 import json
 import logging
 import os
@@ -54,8 +55,6 @@ log = logging.getLogger("job_notifier")
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 USER_AGENT = "discord-loker-digital-bot/2.0 (+github-actions)"
 
-# Screenshot service (gratis, tanpa API key) untuk preview halaman job
-SCREENSHOT_URL = "https://image.thum.io/get/width/1280/crop/640/noanimate/"
 # Fallback logo untuk author icon
 FALLBACK_LOGO = "https://ui-avatars.com/api/?background=5865F2&color=fff&bold=true&size=64&name="
 
@@ -203,13 +202,6 @@ def _get_company_logo(item, source, company_name):
     return FALLBACK_LOGO + name_encoded
 
 
-def _get_screenshot_url(job_url):
-    """Generate screenshot URL dari halaman job menggunakan thum.io."""
-    if not job_url:
-        return None
-    return SCREENSHOT_URL + job_url
-
-
 def _format_job_type(raw_type):
     """Format job type jadi label yang rapi."""
     if not raw_type:
@@ -240,7 +232,7 @@ def _format_tags(item, source, max_tags=4):
     # Clean up tags
     clean_tags = []
     for tag in tags[:max_tags]:
-        tag_str = str(tag).strip().replace("-", " ").title()
+        tag_str = html.unescape(str(tag).strip().replace("-", " ").title())
         if len(tag_str) > 20:
             tag_str = tag_str[:18] + "…"
         clean_tags.append(f"`{tag_str}`")
@@ -305,8 +297,8 @@ def fetch_api_source(source):
         jobs.append(
             {
                 "id": url,
-                "title": str(title).strip(),
-                "company": str(company).strip(),
+                "title": html.unescape(str(title).strip()),
+                "company": html.unescape(str(company).strip()),
                 "url": url,
                 "source": name,
                 "salary": salary,
@@ -347,8 +339,8 @@ def fetch_rss_source(source):
         jobs.append(
             {
                 "id": link,
-                "title": title.strip(),
-                "company": label,
+                "title": html.unescape(title.strip()),
+                "company": html.unescape(label),
                 "url": link,
                 "source": name,
                 "salary": salary_est,
@@ -382,9 +374,6 @@ def build_embed(job):
 
     description = "\n".join(desc_lines)
 
-    # Screenshot halaman job sebagai gambar besar (style artikel)
-    screenshot = _get_screenshot_url(job["url"])
-
     embed = {
         "title": f"💼 {job['title'][:245]}",
         "url": job["url"],
@@ -400,14 +389,16 @@ def build_embed(job):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Tambah company logo sebagai author icon (kalau ada & valid)
+    # Tambah company logo
     logo = job.get("logo", "")
-    if logo and logo.startswith("http") and "ui-avatars" not in logo:
-        embed["author"]["icon_url"] = logo
-
-    # Tambah screenshot sebagai gambar besar di bawah (style artikel)
-    if screenshot:
-        embed["image"] = {"url": screenshot}
+    if logo and logo.startswith("http"):
+        if "ui-avatars" not in logo:
+            # Jika logo asli, pakai sebagai author icon dan gambar besar
+            embed["author"]["icon_url"] = logo
+            embed["image"] = {"url": logo}
+        else:
+            # Jika fallback ui-avatars, taruh di thumbnail kecil saja
+            embed["thumbnail"] = {"url": logo}
 
     return embed
 
